@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Integration Health Monitor</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+          },
+        },
+      },
+    };
+  </script>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    html, body { background-color: #0f172a; }
+    select option { background-color: #0f172a; color: #e2e8f0; }
+    input[type="number"] { -moz-appearance: textfield; }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  </style>
+</head>
+
+<body class="bg-slate-900 font-sans text-slate-200 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    const POLL_MS = 15000;
+    const METHODS = ["GET", "POST", "PUT", "DELETE"];
+    const EMPTY_FORM = {
+      name: "",
+      url: "",
+      method: "GET",
+      expected_status_code: 200,
+      timeout_seconds: 10,
+    };
+
+    const inputClass =
+      "w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-sm " +
+      "text-slate-200 placeholder-slate-500 focus:border-emerald-500 " +
+      "focus:outline-none focus:ring-1 focus:ring-emerald-500/30";
+
+    function Field({ label, className, children }) {
+      return (
+        <label className={"block " + (className || "")}>
+          <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">
+            {label}
+          </span>
+          {children}
+        </label>
+      );
+    }
+
+    function StatusDot({ healthy }) {
+      return (
+        <span
+          className={"inline-block h-2 w-2 shrink-0 rounded-full " + (healthy ? "bg-emerald-400" : "bg-red-400")}
+        />
+      );
+    }
+
+    function MetricCard({ label, value }) {
+      return (
+        <div className="rounded-lg border border-slate-800 bg-slate-800 p-5">
+          <p className="text-sm text-slate-400">{label}</p>
+          <p className="mt-2 text-3xl font-semibold tabular-nums text-white">{value}</p>
+        </div>
+      );
+    }
+
+    function AddEndpointForm({ onAdded }) {
+      const [form, setForm] = useState(EMPTY_FORM);
+      const [saving, setSaving] = useState(false);
+      const [error, setError] = useState(null);
+
+      const update = (field) => (event) =>
+        setForm((prev) => ({ ...prev, [field]: event.target.value }));
+
+      async function submit(event) {
+        event.preventDefault();
+        if (!form.name.trim() || !form.url.trim()) return;
+
+        const expected = Number(form.expected_status_code);
+        const timeout = Number(form.timeout_seconds);
+        if (!Number.isInteger(expected) || expected < 100 || expected > 599) {
+          setError("Expected status must be a whole number between 100 and 599.");
+          return;
+        }
+        if (!Number.isFinite(timeout) || timeout <= 0) {
+          setError("Timeout must be greater than 0 seconds.");
+          return;
+        }
+
+        setSaving(true);
+        setError(null);
+        try {
+          const response = await fetch("/endpoints", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: form.name.trim(),
+              url: form.url.trim(),
+              method: form.method,
+              expected_status_code: expected,
+              timeout_seconds: timeout,
+            }),
+          });
+          if (!response.ok) throw new Error("POST /endpoints -> " + response.status);
+          setForm(EMPTY_FORM);
+          onAdded();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setSaving(false);
+        }
+      }
+
+      return (
+        <form
+          onSubmit={submit}
+          className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-slate-800 px-4 py-3"
+        >
+          <Field label="Name" className="min-w-[150px] flex-1">
+            <input
+              className={inputClass}
+              placeholder="Payments API"
+              value={form.name}
+              onChange={update("name")}
+            />
+          </Field>
+
+          <Field label="URL" className="min-w-[220px] flex-[2]">
+            <input
+              className={inputClass}
+              placeholder="https://example.com/health"
+              value={form.url}
+              onChange={update("url")}
+            />
+          </Field>
+
+          <Field label="Method" className="w-[104px]">
+            <select className={inputClass} value={form.method} onChange={update("method")}>
+              {METHODS.map((method) => (
+                <option key={method} value={method}>{method}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Expected" className="w-[104px]">
+            <input
+              type="number"
+              min="100"
+              max="599"
+              step="1"
+              className={inputClass}
+              value={form.expected_status_code}
+              onChange={update("expected_status_code")}
+            />
+          </Field>
+
+          <Field label="Timeout (s)" className="w-[104px]">
+            <input
+              type="number"
+              min="0.5"
+              step="0.5"
+              className={inputClass}
+              value={form.timeout_seconds}
+              onChange={update("timeout_seconds")}
+            />
+          </Field>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="h-[38px] rounded-md bg-emerald-500 px-4 text-sm font-semibold text-slate-900 transition-colors hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {saving ? "Adding…" : "Add"}
+          </button>
+
+          {error && <p className="w-full text-xs text-red-400">{error}</p>}
+        </form>
+      );
+    }
+
+    function Dashboard() {
+      const [endpoints, setEndpoints] = useState([]);
+      const [metrics, setMetrics] = useState({});
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [updatedAt, setUpdatedAt] = useState(null);
+
+      const refresh = useCallback(async () => {
+        try {
+          const response = await fetch("/endpoints");
+          if (!response.ok) throw new Error("GET /endpoints -> " + response.status);
+          const list = await response.json();
+
+          const pairs = await Promise.all(
+            list.map(async (endpoint) => {
+              try {
+                const res = await fetch("/endpoints/" + endpoint.id + "/metrics");
+                if (!res.ok) return [endpoint.id, null];
+                return [endpoint.id, await res.json()];
+              } catch (err) {
+                return [endpoint.id, null];
+              }
+            })
+          );
+
+          setEndpoints(list);
+          setMetrics(Object.fromEntries(pairs));
+          setError(null);
+          setUpdatedAt(new Date());
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        refresh();
+        const timer = setInterval(refresh, POLL_MS);
+        return () => clearInterval(timer);
+      }, [refresh]);
+
+      const summary = useMemo(() => {
+        let checks = 0;
+        let successful = 0;
+        let weightedLatency = 0;
+        let weightedLatencyChecks = 0;
+
+        endpoints.forEach((endpoint) => {
+          const m = metrics[endpoint.id];
+          if (!m) return;
+          checks += m.total_checks;
+          successful += m.successful_checks;
+          if (m.avg_response_time_ms !== null && m.total_checks > 0) {
+            weightedLatency += m.avg_response_time_ms * m.total_checks;
+            weightedLatencyChecks += m.total_checks;
+          }
+        });
+
+        return {
+          total: endpoints.length,
+          uptime: checks > 0 ? (successful / checks) * 100 : null,
+          latency: weightedLatencyChecks > 0 ? weightedLatency / weightedLatencyChecks : null,
+        };
+      }, [endpoints, metrics]);
+
+      return (
+        <div className="mx-auto max-w-5xl px-4 py-8">
+          <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-semibold text-white">API Integration Health Monitor</h1>
+              <p className="mt-1 text-sm text-slate-400">
+                Uptime and latency across your monitored integrations.
+              </p>
+            </div>
+            <div className="text-right text-xs text-slate-400">
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+                Auto-refresh every {POLL_MS / 1000}s
+              </span>
+              <p className="mt-1 text-slate-500">
+                Last updated {updatedAt ? updatedAt.toLocaleTimeString() : "—"}
+              </p>
+            </div>
+          </header>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <MetricCard label="Total Endpoints" value={summary.total} />
+            <MetricCard
+              label="Overall Uptime"
+              value={summary.uptime === null ? "—" : summary.uptime.toFixed(1) + "%"}
+            />
+            <MetricCard
+              label="Avg Response Time"
+              value={summary.latency === null ? "—" : Math.round(summary.latency) + " ms"}
+            />
+          </div>
+
+          {error && (
+            <div className="mb-6 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-400">
+              {error}
+            </div>
+          )}
+
+          <AddEndpointForm onAdded={refresh} />
+
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-white">Endpoints</h2>
+            <span className="text-xs text-slate-400">
+              {endpoints.length} monitored
+            </span>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-800">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-800 text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Method</th>
+                  <th className="px-4 py-3 font-medium">URL</th>
+                  <th className="px-4 py-3 font-medium">Uptime</th>
+                  <th className="px-4 py-3 font-medium">Latency</th>
+                  <th className="px-4 py-3 font-medium">Checks</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {loading && (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-6 text-center text-slate-500">
+                      Loading…
+                    </td>
+                  </tr>
+                )}
+
+                {!loading && endpoints.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-6 text-center text-slate-500">
+                      No endpoints yet — add one above.
+                    </td>
+                  </tr>
+                )}
+
+                {endpoints.map((endpoint) => {
+                  const m = metrics[endpoint.id];
+                  const healthy = Boolean(m && m.uptime_percentage === 100);
+                  const latency =
+                    m && m.avg_response_time_ms !== null
+                      ? Math.round(m.avg_response_time_ms) + " ms"
+                      : "—";
+
+                  return (
+                    <tr key={endpoint.id} className="transition-colors hover:bg-slate-800/40">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <StatusDot healthy={healthy} />
+                          <span className="font-medium text-white">{endpoint.name}</span>
+                        </div>
+                        <div
+                          className={
+                            "mt-0.5 pl-4 text-xs " + (healthy ? "text-emerald-400" : "text-red-400")
+                          }
+                        >
+                          {healthy ? "Operational" : "Down"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-slate-400">
+                          {endpoint.method}
+                        </span>
+                      </td>
+                      <td
+                        className="max-w-[260px] truncate px-4 py-3 text-slate-400"
+                        title={endpoint.url}
+                      >
+                        {endpoint.url}
+                      </td>
+                      <td
+                        className={
+                          "px-4 py-3 font-medium tabular-nums " +
+                          (healthy ? "text-emerald-400" : "text-red-400")
+                        }
+                      >
+                        {m ? m.uptime_percentage.toFixed(1) + "%" : "—"}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums text-slate-300">{latency}</td>
+                      <td className="px-4 py-3 tabular-nums text-slate-400">
+                        {m ? m.total_checks : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <footer className="mt-4 text-xs text-slate-500">
+            Operational = 100% uptime · Down = anything below 100%
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<Dashboard />);
+  </script>
+</body>
+</html>

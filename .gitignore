@@ -1,0 +1,20 @@
+# Runtime data
+monitor.db
+test_monitor.db
+.dashboard.pid
+dashboard.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
